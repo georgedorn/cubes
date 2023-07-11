@@ -1,10 +1,18 @@
 import os
 import sys
 import math
+from numba import jit, njit
 import numpy as np
 import argparse
 from time import perf_counter
 
+@jit
+def single_axis_rotation(polycube, axes):
+    """Yield four rotations of the given 3d array in the plane spanned by the given axes.
+    For example, a rotation in axes (0,1) is a rotation around axis 2"""
+    return [np.rot90(polycube, i, axes) for i in range(4)]
+
+@jit
 def all_rotations(polycube):
     """
     Calculates all rotations of a polycube.
@@ -20,26 +28,17 @@ def all_rotations(polycube):
     generator(np.array): Yields new rotations of this cube about all axes
   
     """
-    def single_axis_rotation(polycube, axes):
-        """Yield four rotations of the given 3d array in the plane spanned by the given axes.
-        For example, a rotation in axes (0,1) is a rotation around axis 2"""
-        for i in range(4):
-             yield np.rot90(polycube, i, axes)
+    rots = []
+    rots.extend(single_axis_rotation(polycube, (1,2)))
+    rots.extend(single_axis_rotation(np.rot90(polycube, 2, axes=(0,2)), (1,2)))
+    rots.extend(single_axis_rotation(np.rot90(polycube, axes=(0,2)), (0,1)))
+    rots.extend(single_axis_rotation(np.rot90(polycube, -1, axes=(0,2)), (0,1)))
+    rots.extend(single_axis_rotation(np.rot90(polycube, axes=(0,1)), (0,2)))
+    rots.extend(single_axis_rotation(np.rot90(polycube, -1, axes=(0,1)), (0,2)))
 
-    # 4 rotations about axis 0
-    yield from single_axis_rotation(polycube, (1,2))
+    return rots
 
-    # rotate 180 about axis 1, 4 rotations about axis 0
-    yield from single_axis_rotation(np.rot90(polycube, 2, axes=(0,2)), (1,2))
-
-    # rotate 90 or 270 about axis 1, 8 rotations about axis 2
-    yield from single_axis_rotation(np.rot90(polycube, axes=(0,2)), (0,1))
-    yield from single_axis_rotation(np.rot90(polycube, -1, axes=(0,2)), (0,1))
-
-    # rotate about axis 2, 8 rotations about axis 1
-    yield from single_axis_rotation(np.rot90(polycube, axes=(0,1)), (0,2))
-    yield from single_axis_rotation(np.rot90(polycube, -1, axes=(0,1)), (0,2))
-
+@njit
 def crop_cube(cube):
     """
     Crops an np.array to have no all-zero padding around the edge.
@@ -62,6 +61,7 @@ def crop_cube(cube):
         cube = np.swapaxes(cube, 0, i)  # send i-th axis to its original position
     return cube
 
+@jit
 def expand_cube(cube):
     """
     Expands a polycube by adding single blocks at all valid locations.
@@ -94,6 +94,7 @@ def expand_cube(cube):
         new_cube[x,y,z] = 1
         yield crop_cube(new_cube)
 
+@jit
 def generate_polycubes(n, use_cache=False):
     """
     Generates all polycubes of size n
@@ -118,11 +119,11 @@ def generate_polycubes(n, use_cache=False):
 
     # Check cache
     cache_path = f"cubes_{n}.npy"
-    if use_cache and os.path.exists(cache_path):
-        print(f"\rLoading polycubes n={n} from cache: ", end = "")
-        polycubes = np.load(cache_path, allow_pickle=True)
-        print(f"{len(polycubes)} shapes")
-        return polycubes
+#    if use_cache and os.path.exists(cache_path):
+#        print(f"\rLoading polycubes n={n} from cache: ")
+#        polycubes = np.load(cache_path, allow_pickle=True)
+#        print(f"{len(polycubes)} shapes")
+#        return polycubes
 
     # Empty list of new n-polycubes
     polycubes = []
@@ -133,23 +134,24 @@ def generate_polycubes(n, use_cache=False):
     for idx, base_cube in enumerate(base_cubes):
         # Iterate over possible expansion positions
         for new_cube in expand_cube(base_cube):
-            if not cube_exists_rle(new_cube, polycubes_rle):
+            if rle(new_cube) not in polycubes_rle:
                 polycubes.append(new_cube)
                 for cube_rotation in all_rotations(new_cube):
                     polycubes_rle.add(rle(cube_rotation))
 
         if (idx % 100 == 0):               
             perc = round((idx / len(base_cubes)) * 100,2)
-            print(f"\rGenerating polycubes n={n}: {perc}%", end="")
+            print(f"\rGenerating polycubes n={n}: {perc}%")
 
     print(f"\rGenerating polycubes n={n}: 100%   ")
     
-    if use_cache:
-        cache_path = f"cubes_{n}.npy"
-        np.save(cache_path, np.array(polycubes, dtype=object), allow_pickle=True)
+#    if use_cache:
+#        cache_path = f"cubes_{n}.npy"
+#        np.save(cache_path, np.array(polycubes, dtype=object), allow_pickle=True)
 
     return polycubes
 
+@jit
 def rle(polycube):
     """
     Computes a simple hash of a given polycube.
