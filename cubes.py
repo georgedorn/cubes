@@ -150,7 +150,7 @@ def generate_polycubes(n, use_cache=False):
 
     return polycubes
 
-def rle(polycube: np.ndarray):
+def rle(polycube):
     """
     Computes a simple hash of a given polycube.
     It does this by converting the polycube into a 1d array and then interpreting those bits as a unsigned integer
